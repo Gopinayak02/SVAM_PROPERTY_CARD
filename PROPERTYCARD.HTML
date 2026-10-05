@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SVAMITVA — Property Card Generation System</title>
+<style>
+/* ─── RESET & BASE ──────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --green:#1a5c35; --green-dk:#103d22; --green-lt:#e8f4ec;
+  --orange:#d4751b; --orange-lt:#fdf3e8;
+  --paper:#fdfaf3; --bg:#c8c2b0;
+  --border:#cbb890; --text:#1a1a1a; --dim:#666; --line:#c0b090;
+  --blue-fill:#1a2b8c;
+}
+body{font-family:'Segoe UI',Arial,sans-serif;min-height:100vh;}
+
+/* ─── TOAST ─────────────────────────────────────────────────── */
+#toastArea{position:fixed;top:18px;right:18px;z-index:9999;display:flex;flex-direction:column;gap:10px;max-width:310px;}
+.toast{
+  background:#0d2318;border-radius:10px;padding:14px 18px 12px;
+  border-left:4px solid var(--green);
+  box-shadow:0 10px 32px rgba(0,0,0,.4);
+  transform:translateX(130%);opacity:0;
+  transition:transform .38s cubic-bezier(.175,.885,.32,1.275),opacity .3s;
+  font-size:12px;color:#d0e8d8;
+}
+.toast.show{transform:translateX(0);opacity:1;}
+.toast.warn{border-left-color:var(--orange);}
+.toast-ttl{font-weight:700;font-size:13px;margin-bottom:3px;color:#fff;}
+.toast-otp{display:block;font-size:28px;font-weight:900;font-family:'Courier New',monospace;letter-spacing:8px;color:#f0c040;margin:6px 0 4px;}
+.toast-note{font-size:9.5px;color:#888;margin-top:2px;}
+
+/* ─── LOADING OVERLAY ───────────────────────────────────────── */
+#loadOverlay{
+  position:fixed;inset:0;background:rgba(8,28,16,.96);
+  z-index:9998;display:none;flex-direction:column;
+  align-items:center;justify-content:center;color:white;
+}
+#loadOverlay.show{display:flex;}
+.spinner{width:56px;height:56px;border:5px solid rgba(255,255,255,.12);border-top-color:#27ae60;border-radius:50%;animation:spin .85s linear infinite;margin-bottom:22px;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.load-title{font-size:15px;font-weight:700;letter-spacing:1px;margin-bottom:14px;}
+.load-steps{font-size:11px;color:rgba(255,255,255,.55);line-height:2.2;text-align:left;}
+.load-steps .done{color:#52d88a;font-weight:600;}
+.load-steps .active{color:#f0c040;font-weight:700;}
+.load-bar-bg{width:280px;height:4px;background:rgba(255,255,255,.1);border-radius:2px;margin-top:18px;overflow:hidden;}
+.load-bar{height:100%;border-radius:2px;background:linear-gradient(90deg,#27ae60,#f0c040);width:0%;transition:width .6s ease;}
+
+/* ─── VERIFY SCREEN ─────────────────────────────────────────── */
+#verifyScreen{
+  min-height:100vh;
+  background:linear-gradient(150deg,#082010 0%,#1a5c35 45%,#0d3520 100%);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:20px;position:relative;overflow:hidden;
+}
+#verifyScreen::before{
+  content:'';position:absolute;inset:0;
+  background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);
+  background-size:44px 44px;pointer-events:none;
+}
+.sys-label{
+  color:rgba(255,255,255,.65);font-size:10px;letter-spacing:3px;
+  font-family:'Courier New',monospace;text-align:center;margin-bottom:18px;
+  position:relative;
+}
+.sys-label span{color:#f0c040;}
+
+.vcard{
+  background:white;border-radius:12px;width:100%;max-width:430px;
+  box-shadow:0 30px 80px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.05);
+  overflow:hidden;position:relative;
+}
+.vcard-top{
+  background:var(--green);padding:14px 20px;
+  display:flex;align-items:center;gap:12px;
+}
+.vcard-top-logo{width:32px;height:32px;flex-shrink:0;}
+.vcard-top h2{color:white;font-size:13px;font-weight:700;letter-spacing:.5px;line-height:1.3;}
+.vcard-top p{color:rgba(255,255,255,.65);font-size:9px;margin-top:2px;}
+
+.vcard-body{padding:22px 24px;}
+
+/* Step track */
+.step-track{display:flex;align-items:flex-start;gap:0;margin-bottom:22px;}
+.step-node{display:flex;flex-direction:column;align-items:center;gap:4px;}
+.step-circ{
+  width:30px;height:30px;border-radius:50%;border:2px solid #e0e0e0;
+  background:white;color:#ccc;font-size:12px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;transition:all .3s;
+}
+.step-circ.act{border-color:var(--green);background:var(--green);color:white;}
+.step-circ.done{border-color:#27ae60;background:#27ae60;color:white;}
+.step-lbl{font-size:9px;color:#bbb;font-weight:500;white-space:nowrap;}
+.step-circ.act+.step-lbl{color:var(--green);font-weight:700;}
+.step-circ.done+.step-lbl{color:#27ae60;}
+.step-line{flex:1;height:2px;background:#e0e0e0;margin-top:14px;transition:background .3s;}
+.step-line.done{background:#27ae60;}
+
+/* Sections */
+.vsec{display:none;}
+.vsec.show{display:block;}
+.vsec-h{font-size:16px;font-weight:700;color:#1a2b3c;margin-bottom:4px;}
+.vsec-sub{font-size:11px;color:#888;margin-bottom:18px;line-height:1.6;}
+
+/* Aadhaar input */
+.ad-wrap{position:relative;margin-bottom:6px;}
+.ad-input{
+  width:100%;border:2px solid #e0e0e0;border-radius:8px;
+  padding:13px 46px 13px 16px;font-size:20px;
+  font-family:'Courier New',monospace;letter-spacing:4px;
+  color:#1a1a1a;outline:none;transition:border-color .2s,box-shadow .2s;
+}
+.ad-input:focus{border-color:var(--green);box-shadow:0 0 0 3px rgba(26,92,53,.12);}
+.ad-input.ok{border-color:#27ae60;}
+.ad-icon{position:absolute;right:14px;top:50%;transform:translateY(-50%);font-size:16px;display:none;}
+.ad-icon.show{display:block;}
+.ad-hint{font-size:10px;color:#bbb;margin-top:4px;}
+
+/* Primary btn */
+.btn-g,.btn-o,.btn-ghost{
+  width:100%;padding:13px;border:none;border-radius:8px;
+  font-size:13px;font-weight:700;letter-spacing:1.2px;cursor:pointer;
+  transition:all .2s;display:flex;align-items:center;justify-content:center;gap:8px;
+  margin-top:14px;
+}
+.btn-g{background:var(--green);color:white;}
+.btn-g:hover:not(:disabled){background:var(--green-dk);transform:translateY(-1px);box-shadow:0 4px 12px rgba(26,92,53,.35);}
+.btn-g:disabled{background:#ccc;cursor:not-allowed;}
+.btn-o{background:var(--orange);color:white;}
+.btn-o:hover:not(:disabled){background:#b35e0f;box-shadow:0 4px 12px rgba(212,117,27,.35);}
+.btn-o:disabled{background:#ccc;cursor:not-allowed;}
+.btn-ghost{background:none;border:1px solid #e0e0e0;color:#888;margin-top:8px;}
+.btn-ghost:hover{background:#f5f5f5;}
+
+/* OTP sent info */
+.otp-info{
+  background:#f0f9f3;border:1px solid #b2dfbc;border-radius:8px;
+  padding:10px 14px;display:flex;align-items:center;gap:10px;
+  font-size:12px;color:var(--green);margin-bottom:14px;
+}
+.otp-info .ico{font-size:20px;flex-shrink:0;}
+.otp-info .mob{font-size:11px;color:#27ae60;margin-top:2px;}
+
+/* OTP boxes */
+.otp-row{display:flex;gap:8px;justify-content:center;margin:12px 0 8px;}
+.otp-box{
+  width:46px;height:54px;border:2px solid #e0e0e0;border-radius:8px;
+  font-size:22px;font-weight:700;text-align:center;
+  font-family:'Courier New',monospace;outline:none;transition:all .2s;color:var(--green);
+}
+.otp-box:focus{border-color:var(--green);box-shadow:0 0 0 3px rgba(26,92,53,.12);}
+.otp-box.filled{background:var(--green-lt);border-color:var(--green);}
+
+.resend-row{display:flex;justify-content:space-between;font-size:11px;color:#aaa;margin-top:6px;}
+.resend-btn{background:none;border:none;color:var(--green);font-size:11px;font-weight:600;cursor:pointer;padding:0;}
+.resend-btn:disabled{color:#ccc;cursor:not-allowed;}
+.timer{font-family:'Courier New',monospace;color:var(--orange);font-weight:700;}
+
+.secure-note{text-align:center;font-size:9.5px;color:#ccc;margin-top:12px;letter-spacing:.3px;}
+
+.vfooter{color:rgba(255,255,255,.35);font-size:9px;margin-top:14px;text-align:center;letter-spacing:1px;position:relative;}
+
+/* ─── DOCUMENTS PAGE ────────────────────────────────────────── */
+#docsPage{display:none;background:var(--bg);min-height:100vh;padding:18px;}
+
+.docs-topbar{text-align:center;margin-bottom:14px;}
+.docs-sys{font-size:10px;color:rgba(255,255,255,.5);letter-spacing:2.5px;font-family:'Courier New',monospace;}
+.docs-status{
+  display:inline-flex;align-items:center;gap:6px;
+  background:rgba(39,174,96,.15);border:1px solid rgba(39,174,96,.35);
+  color:#a0e8b8;padding:4px 14px;border-radius:20px;
+  font-size:9.5px;font-family:'Courier New',monospace;margin-top:4px;
+}
+.pls-dot{width:6px;height:6px;border-radius:50%;background:#27ae60;animation:blink 1.5s infinite;}
+@keyframes blink{50%{opacity:.25;}}
+
+.act-bar{display:flex;gap:10px;justify-content:center;margin-bottom:16px;flex-wrap:wrap;}
+.act-btn{
+  display:flex;align-items:center;gap:7px;padding:9px 20px;
+  border:none;border-radius:6px;font-size:12px;font-weight:700;
+  cursor:pointer;letter-spacing:.5px;transition:all .2s;
+}
+.act-btn:hover{transform:translateY(-1px);}
+.ab-dl{background:var(--green);color:white;}
+.ab-dl:hover{box-shadow:0 4px 12px rgba(26,92,53,.4);}
+.ab-pr{background:var(--orange);color:white;}
+.ab-pr:hover{box-shadow:0 4px 12px rgba(212,117,27,.4);}
+.ab-rs{background:white;color:#555;border:1px solid #ccc;}
+.ab-rs:hover{background:#f5f5f5;}
+
+.docs-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:1320px;margin:0 auto;}
+
+/* ─── DOCUMENT PAPER ────────────────────────────────────────── */
+.dpaper{
+  background:var(--paper);border-radius:3px;
+  box-shadow:0 6px 28px rgba(0,0,0,.22);
+  overflow:hidden;position:relative;font-size:10.5px;
+}
+/* Watermark */
+.dpaper::after{
+  content:'सत्यमेव जयते';position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%) rotate(-26deg);
+  font-size:54px;font-weight:900;
+  color:rgba(212,117,27,.05);white-space:nowrap;
+  pointer-events:none;z-index:0;letter-spacing:6px;
+}
+
+/* Logo row */
+.dlogo-row{
+  display:flex;align-items:center;padding:10px 18px;
+  gap:14px;border-bottom:1px solid #e0d8c8;background:white;
+  position:relative;z-index:1;
+}
+.gov-logo{display:flex;align-items:center;gap:8px;flex-shrink:0;}
+.ashoka{
+  width:40px;height:40px;border-radius:50%;
+  border:2px solid #957020;display:flex;align-items:center;
+  justify-content:center;font-size:20px;flex-shrink:0;background:white;
+}
+.gov-txt b{font-size:8.5px;font-weight:800;color:#1a1a1a;display:block;text-transform:uppercase;letter-spacing:.3px;line-height:1.3;}
+.gov-txt span{font-size:7.5px;color:#555;}
+
+.sv-logo{flex:1;text-align:center;}
+.sv-gems{display:flex;justify-content:center;align-items:center;gap:3px;margin-bottom:2px;}
+.sv-gem{background:var(--orange);transform:rotate(45deg);border-radius:1px;}
+.sv-gem.lg{width:13px;height:13px;}
+.sv-gem.sm{width:9px;height:9px;margin-top:2px;}
+.sv-name{font-size:15px;font-weight:900;color:var(--orange);letter-spacing:2px;line-height:1;}
+.sv-tag{font-size:6px;color:#555;line-height:1.4;max-width:120px;margin:2px auto 0;}
+
+.pr-logo{text-align:center;flex-shrink:0;}
+.pr-ico{font-size:22px;}
+.pr-lbl{font-size:10px;font-weight:800;color:#222;margin-top:2px;}
+
+/* Title bar */
+.dtitle{
+  background:var(--green);color:white;text-align:center;
+  padding:7px 18px;font-size:14px;font-weight:800;
+  letter-spacing:2.5px;position:relative;z-index:1;
+}
+
+/* Doc body */
+.dbody{padding:11px 18px 6px;position:relative;z-index:1;}
+
+/* Field rows */
+.fr{display:flex;align-items:flex-end;gap:5px;margin-bottom:6.5px;min-height:19px;}
+.fl{font-size:10.5px;font-weight:600;color:#1a1a1a;white-space:nowrap;flex-shrink:0;}
+.fc{font-size:10.5px;color:#444;flex-shrink:0;}
+.fv{flex:1;border-bottom:1px solid var(--line);font-size:10.5px;color:#1a1a1a;padding-bottom:1px;min-height:15px;min-width:0;}
+.fv.d{color:var(--blue-fill);font-weight:600;border-bottom-color:var(--green);border-bottom-width:1.5px;}
+.fv.wrap{white-space:normal;word-break:break-word;line-height:1.5;}
+
+.shdr{color:var(--orange);font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;margin:9px 0 6px;}
+
+/* Top grid for property card */
+.pc-top{display:grid;grid-template-columns:1fr 106px;gap:12px;}
+.mapbox{
+  width:106px;height:106px;border:1.5px solid #ccc;
+  border-radius:3px;overflow:hidden;background:#f5f5ef;flex-shrink:0;
+}
+
+/* Footer */
+.dfooter{border-top:1px solid #ddd;padding:8px 18px;position:relative;z-index:1;}
+.sig-row{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:4px;}
+.sig-txt{font-size:10px;color:#444;}
+.sig-line{border-bottom:1px solid #888;height:18px;display:inline-block;vertical-align:bottom;}
+.dnote{font-size:8.5px;color:#999;font-style:italic;text-align:center;margin-top:3px;}
+
+/* ─── PRINT ─────────────────────────────────────────────────── */
+@media print{
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}
+  #verifyScreen,#loadOverlay,#toastArea,.act-bar,.docs-topbar{display:none!important;}
+  #docsPage{display:block!important;background:white;padding:6px;min-height:auto;}
+  .docs-grid{grid-template-columns:1fr 1fr;gap:8px;max-width:100%;}
+  .dpaper{box-shadow:none;border:1px solid #ccc;}
+}
+@media(max-width:840px){
+  .docs-grid{grid-template-columns:1fr;}
+  .pc-top{grid-template-columns:1fr;}
+  .mapbox{display:none;}
+}
+</style>
+</head>
+<body>
+
+<!-- TOAST AREA -->
+<div id="toastArea"></div>
+
+<!-- LOADING OVERLAY -->
+<div id="loadOverlay">
+  <div class="spinner"></div>
+  <div class="load-title">PROCESSING REQUEST</div>
+  <div class="load-steps" id="ls">
+    <div id="ls0">◦ &nbsp;Verifying Aadhaar with UIDAI CIDR...</div>
+    <div id="ls1">◦ &nbsp;Fetching demographic data from CIDR...</div>
+    <div id="ls2">◦ &nbsp;Retrieving property map · SVAM-AiMapper v2.1...</div>
+    <div id="ls3">◦ &nbsp;Generating SVAMITVA Property Card...</div>
+  </div>
+  <div class="load-bar-bg"><div class="load-bar" id="loadBar"></div></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!--   STEP 1 & 2 — VERIFICATION SCREEN                        -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div id="verifyScreen">
+  <div class="sys-label">
+    SVAMITVA · <span>PROPERTY CARD GENERATION SYSTEM</span> · DEMO v2.1
+  </div>
+
+  <div class="vcard">
+    <!-- Green header -->
+    <div class="vcard-top">
+      <svg class="vcard-top-logo" viewBox="0 0 32 32" fill="none">
+        <polygon points="16,2 30,12 30,30 2,30 2,12" stroke="#f0c040" stroke-width="2.2" fill="none"/>
+        <polygon points="16,2 30,12 16,12" fill="#f0c040" opacity=".4"/>
+        <rect x="11" y="19" width="10" height="11" fill="#f0c040" opacity=".75"/>
+        <rect x="14" y="19" width="4" height="6" fill="#1a5c35"/>
+      </svg>
+      <div>
+        <h2>SVAMITVA — Property Card System</h2>
+        <p>Ministry of Panchayati Raj · Government of India</p>
+      </div>
+    </div>
+
+    <div class="vcard-body">
+      <!-- Step progress -->
+      <div class="step-track">
+        <div class="step-node">
+          <div class="step-circ act" id="sc0">1</div>
+          <div class="step-lbl">Aadhaar</div>
+        </div>
+        <div class="step-line" id="sl0"></div>
+        <div class="step-node">
+          <div class="step-circ" id="sc1">2</div>
+          <div class="step-lbl">Verify OTP</div>
+        </div>
+        <div class="step-line" id="sl1"></div>
+        <div class="step-node">
+          <div class="step-circ" id="sc2">3</div>
+          <div class="step-lbl">Property Card</div>
+        </div>
+      </div>
+
+      <!-- ─ SECTION 1: Aadhaar ─ -->
+      <div class="vsec show" id="sec1">
+        <div class="vsec-h">Enter Aadhaar Number</div>
+        <div class="vsec-sub">Your Aadhaar-linked details will auto-populate the SVAMITVA property application and card.</div>
+        <div style="font-size:10px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Aadhaar Number</div>
+        <div class="ad-wrap">
+          <input type="text" id="adInput" class="ad-input" maxlength="14"
+                 placeholder="XXXX  XXXX  XXXX" autocomplete="off"
+                 oninput="fmtAadhaar(this)"/>
+          <span class="ad-icon" id="adIcon"></span>
+        </div>
+        <div class="ad-hint">Enter your 12-digit Aadhaar number (Demo: any valid 12-digit format)</div>
+        <button class="btn-g" id="sendBtn" onclick="sendOTP()" disabled>📱 &nbsp;SEND OTP</button>
+        <div class="secure-note">🔒 &nbsp;Secured by UIDAI CIDR · End-to-end encrypted · Demo Mode</div>
+      </div>
+
+      <!-- ─ SECTION 2: OTP ─ -->
+      <div class="vsec" id="sec2">
+        <div class="vsec-h">Verify OTP</div>
+        <div class="otp-info">
+          <span class="ico">✅</span>
+          <div>
+            OTP sent to <strong id="mobDisplay">+91 98765XXXXX</strong>
+            <div class="mob">Valid for 10 minutes · Check toast notification for demo OTP</div>
+          </div>
+        </div>
+        <div style="font-size:10px;color:#888;text-align:center;">Enter the 6-digit OTP</div>
+        <div class="otp-row" id="otpRow">
+          <input type="text" class="otp-box" maxlength="1" oninput="otpIn(this,0)" onkeydown="otpKey(event,0)" onpaste="otpPaste(event)">
+          <input type="text" class="otp-box" maxlength="1" oninput="otpIn(this,1)" onkeydown="otpKey(event,1)">
+          <input type="text" class="otp-box" maxlength="1" oninput="otpIn(this,2)" onkeydown="otpKey(event,2)">
+          <input type="text" class="otp-box" maxlength="1" oninput="otpIn(this,3)" onkeydown="otpKey(event,3)">
+          <input type="text" class="otp-box" maxlength="1" oninput="otpIn(this,4)" onkeydown="otpKey(event,4)">
+          <input type="text" class="otp-box" maxlength="1" oninput="otpIn(this,5)" onkeydown="otpKey(event,5)">
+        </div>
+        <div class="resend-row">
+          <span>Resend in <span class="timer" id="timerTxt">0:30</span></span>
+          <button class="resend-btn" id="resendBtn" disabled onclick="resend()">Resend OTP</button>
+        </div>
+        <button class="btn-o" id="verifyBtn" onclick="verifyOTP()" disabled>
+          ✅ &nbsp;VERIFY & GENERATE PROPERTY CARD
+        </button>
+        <button class="btn-ghost" onclick="goBack()">← Back</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="vfooter">Geo-Intel Lab · IIT Tirupati NIF · SVAMITVA PS1 — MoPR Hackathon</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!--   DOCUMENTS PAGE                                           -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div id="docsPage">
+  <div class="docs-topbar">
+    <div class="docs-sys">SVAMITVA · PROPERTY CARD SYSTEM · VERIFIED</div>
+    <div><span class="docs-status"><span class="pls-dot"></span> AADHAAR VERIFIED · CARD GENERATED</span></div>
+  </div>
+
+  <div class="act-bar">
+    <button class="act-btn ab-dl" onclick="downloadCard()">⬇ &nbsp;DOWNLOAD PROPERTY CARD</button>
+    <button class="act-btn ab-pr" onclick="window.print()">🖨️ &nbsp;PRINT BOTH DOCUMENTS</button>
+    <button class="act-btn ab-rs" onclick="resetAll()">↩ &nbsp;NEW REQUEST</button>
+  </div>
+
+  <div class="docs-grid">
+
+    <!-- ═══ LEFT: PROPERTY CARD APPLICATION ═══ -->
+    <div class="dpaper" id="paperApp">
+      <div class="dlogo-row">
+        <div class="gov-logo">
+          <div class="ashoka">🏛️</div>
+          <div class="gov-txt">
+            <b>Ministry of</b><b>Panchayati Raj</b>
+            <span>Government of India</span>
+          </div>
+        </div>
+        <div class="sv-logo">
+          <div class="sv-gems">
+            <div class="sv-gem sm"></div>
+            <div class="sv-gem lg"></div>
+            <div class="sv-gem sm"></div>
+          </div>
+          <div class="sv-name">SVAMITVA</div>
+          <div class="sv-tag">Survey of Villages Abadi and Mapping with Improvised Technology in Village Areas</div>
+        </div>
+        <div class="pr-logo">
+          <div class="pr-ico">👨‍👩‍👧‍👦</div>
+          <div class="pr-lbl">पंचायती राज</div>
+        </div>
+      </div>
+      <div class="dtitle">PROPERTY CARD APPLICATION</div>
+      <div class="dbody">
+        <div class="fr"><span class="fl" style="min-width:110px">Application No.</span><span class="fc">:</span><span class="fv d" id="aAppNo"></span></div>
+        <div class="fr"><span class="fl" style="min-width:110px">Date</span><span class="fc">:</span><span class="fv d" id="aDate"></span></div>
+        <div class="fr"><span class="fl" style="min-width:110px">Village</span><span class="fc">:</span><span class="fv d" id="aVillage"></span></div>
+        <div class="fr"><span class="fl" style="min-width:110px">Gram Panchayat</span><span class="fc">:</span><span class="fv d" id="aGP"></span></div>
+        <div class="fr"><span class="fl" style="min-width:110px">Block</span><span class="fc">:</span><span class="fv d" id="aBlock"></span></div>
+        <div class="fr"><span class="fl" style="min-width:110px">District</span><span class="fc">:</span><span class="fv d" id="aDistrict"></span></div>
+        <div class="fr"><span class="fl" style="min-width:110px">State</span><span class="fc">:</span><span class="fv d" id="aState"></span></div>
+
+        <div class="shdr">Applicant Details</div>
+        <div class="fr"><span class="fl" style="min-width:140px">Name of Applicant</span><span class="fc">:</span><span class="fv d" id="aName"></span></div>
+        <div class="fr"><span class="fl" style="min-width:140px">Father's / Husband's Name</span><span class="fc">:</span><span class="fv d" id="aFather"></span></div>
+        <div class="fr" style="align-items:flex-start"><span class="fl" style="min-width:140px">Address</span><span class="fc">:</span><span class="fv d wrap" id="aAddr"></span></div>
+        <div class="fr"><span class="fl" style="min-width:140px">Mobile No.</span><span class="fc">:</span><span class="fv d" id="aMobile"></span></div>
+        <div class="fr"><span class="fl" style="min-width:140px">Aadhaar No.</span><span class="fc">:</span><span class="fv d" id="aAadhaar"></span></div>
+
+        <div class="shdr">Property Details</div>
+        <div class="fr"><span class="fl" style="min-width:140px">Survey / Plot No.</span><span class="fc">:</span><span class="fv d" id="aSurvey"></span></div>
+        <div class="fr"><span class="fl" style="min-width:140px">Area (in Sq. m.)</span><span class="fc">:</span><span class="fv d" id="aArea"></span></div>
+        <div class="fr"><span class="fl" style="min-width:140px">Location</span><span class="fc">:</span><span class="fv d" id="aLoc"></span></div>
+        <div class="fr"><span class="fl" style="min-width:140px">Land Use</span><span class="fc">:</span><span class="fv d" id="aLandUse"></span></div>
+        <div class="fr" style="align-items:flex-start"><span class="fl" style="min-width:140px">Boundaries (N/E/S/W)</span><span class="fc">:</span><span class="fv d wrap" id="aBounds"></span></div>
+      </div>
+      <div class="dfooter">
+        <div class="sig-row">
+          <div class="sig-txt">Applicant Signature : <span class="sig-line" style="width:110px"></span></div>
+          <div class="sig-txt">Date : <span class="sig-line" style="width:80px"></span></div>
+        </div>
+        <div class="dnote">(To be filled by the applicant and submitted to the Gram Panchayat)</div>
+      </div>
+    </div>
+
+    <!-- ═══ RIGHT: PROPERTY CARD ═══ -->
+    <div class="dpaper" id="paperCard">
+      <div class="dlogo-row">
+        <div class="gov-logo">
+          <div class="ashoka">🏛️</div>
+          <div class="gov-txt">
+            <b>Ministry of</b><b>Panchayati Raj</b>
+            <span>Government of India</span>
+          </div>
+        </div>
+        <div class="sv-logo">
+          <div class="sv-gems">
+            <div class="sv-gem sm"></div>
+            <div class="sv-gem lg"></div>
+            <div class="sv-gem sm"></div>
+          </div>
+          <div class="sv-name">SVAMITVA</div>
+          <div class="sv-tag">Survey of Villages Abadi and Mapping with Improvised Technology in Village Areas</div>
+        </div>
+        <div class="pr-logo">
+          <div class="pr-ico">👨‍👩‍👧‍👦</div>
+          <div class="pr-lbl">पंचायती राज</div>
+        </div>
+      </div>
+      <div class="dtitle">PROPERTY CARD</div>
+      <div class="dbody">
+        <div class="pc-top">
+          <!-- Fields column -->
+          <div>
+            <div class="fr"><span class="fl" style="min-width:110px">Card No.</span><span class="fc">:</span><span class="fv d" id="cCardNo"></span></div>
+            <div class="fr"><span class="fl" style="min-width:110px">Village</span><span class="fc">:</span><span class="fv d" id="cVillage"></span></div>
+            <div class="fr"><span class="fl" style="min-width:110px">Gram Panchayat</span><span class="fc">:</span><span class="fv d" id="cGP"></span></div>
+            <div class="fr"><span class="fl" style="min-width:110px">Block</span><span class="fc">:</span><span class="fv d" id="cBlock"></span></div>
+            <div class="fr"><span class="fl" style="min-width:110px">District</span><span class="fc">:</span><span class="fv d" id="cDistrict"></span></div>
+            <div class="fr"><span class="fl" style="min-width:110px">State</span><span class="fc">:</span><span class="fv d" id="cState"></span></div>
+            <div class="fr"><span class="fl" style="min-width:110px">Survey / Plot No.</span><span class="fc">:</span><span class="fv d" id="cSurvey"></span></div>
+            <div class="fr"><span class="fl" style="min-width:110px">Area (in Sq. m.)</span><span class="fc">:</span><span class="fv d" id="cArea"></span></div>
+            <div class="fr"><span class="fl" style="min-width:110px">Land Use</span><span class="fc">:</span><span class="fv d" id="cLandUse"></span></div>
+          </div>
+          <!-- Property map sketch -->
+          <div class="mapbox">
+            <svg viewBox="0 0 106 106" xmlns="http://www.w3.org/2000/svg" width="106" height="106">
+              <rect width="106" height="106" fill="#f5f5ef"/>
+              <!-- Road (north) -->
+              <rect x="0" y="14" width="106" height="6" fill="#e0dbd0"/>
+              <text x="53" y="19" text-anchor="middle" font-size="4.5" fill="#aaa">═══ Road (6m) ═══</text>
+              <!-- Compass -->
+              <text x="53" y="11" text-anchor="middle" font-size="7" fill="#888" font-weight="bold">N ↑</text>
+              <text x="53" y="102" text-anchor="middle" font-size="7" fill="#888" font-weight="bold">↓ S</text>
+              <text x="5" y="57" text-anchor="middle" font-size="7" fill="#888" font-weight="bold">W</text>
+              <text x="101" y="57" text-anchor="middle" font-size="7" fill="#888" font-weight="bold">E</text>
+              <!-- Plot boundary -->
+              <rect x="22" y="24" width="62" height="60" fill="rgba(212,117,27,.08)" stroke="#d4751b" stroke-width="1.5" stroke-dasharray="4,2"/>
+              <!-- House footprint -->
+              <polygon points="53,33 70,50 70,68 36,68 36,50" fill="none" stroke="#1a5c35" stroke-width="1.5"/>
+              <polygon points="53,33 70,50 36,50" fill="rgba(26,92,53,.18)"/>
+              <rect x="47" y="56" width="12" height="12" fill="none" stroke="#1a5c35" stroke-width="1"/>
+              <!-- Area label -->
+              <text x="53" y="79" text-anchor="middle" font-size="6.5" fill="#1a5c35" font-weight="bold" id="mapArea">87.3 m²</text>
+              <!-- neighbor hints -->
+              <text x="90" y="57" text-anchor="middle" font-size="4" fill="#bbb" transform="rotate(90,90,57)">Neighbor</text>
+              <text x="16" y="57" text-anchor="middle" font-size="4" fill="#bbb" transform="rotate(90,16,57)">Path</text>
+            </svg>
+          </div>
+        </div>
+
+        <div class="shdr">Owner Details</div>
+        <div class="fr"><span class="fl" style="min-width:150px">Name of Owner</span><span class="fc">:</span><span class="fv d" id="cName"></span></div>
+        <div class="fr"><span class="fl" style="min-width:150px">Father's / Husband's Name</span><span class="fc">:</span><span class="fv d" id="cFather"></span></div>
+        <div class="fr" style="align-items:flex-start"><span class="fl" style="min-width:150px">Address</span><span class="fc">:</span><span class="fv d wrap" id="cAddr"></span></div>
+        <div class="fr"><span class="fl" style="min-width:150px">Aadhaar No.</span><span class="fc">:</span><span class="fv d" id="cAadhaar"></span></div>
+        <div class="fr"><span class="fl" style="min-width:150px">Mobile No.</span><span class="fc">:</span><span class="fv d" id="cMobile"></span></div>
+
+        <div class="shdr">Boundaries (N/E/S/W)</div>
+        <div class="fr"><span class="fl" style="min-width:60px">North</span><span class="fc">:</span><span class="fv d" id="cNorth"></span></div>
+        <div class="fr"><span class="fl" style="min-width:60px">East</span><span class="fc">:</span><span class="fv d" id="cEast"></span></div>
+        <div class="fr"><span class="fl" style="min-width:60px">South</span><span class="fc">:</span><span class="fv d" id="cSouth"></span></div>
+        <div class="fr"><span class="fl" style="min-width:60px">West</span><span class="fc">:</span><span class="fv d" id="cWest"></span></div>
+      </div>
+      <div class="dfooter">
+        <div class="sig-row">
+          <div class="sig-txt">Date of Issue :&nbsp;<span class="sig-line" style="width:110px;padding-bottom:1px;font-size:10.5px;color:var(--blue-fill);font-weight:600" id="cIssueDate"></span></div>
+          <div class="sig-txt">Authorised Signatory</div>
+        </div>
+        <div class="dnote">This is a computer generated card and does not require signature.</div>
+      </div>
+    </div>
+
+  </div><!-- /docs-grid -->
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!--   JAVASCRIPT                                               -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+/* ─── DEMO DATA ──────────────────────────────────────────────
+   Simulates: UIDAI CIDR (personal) + SVAM-AiMapper (property)
+   This is what the production system fetches after verification.
+─────────────────────────────────────────────────────────────── */
+const DEMO = {
+  /* Personal — from Aadhaar (UIDAI CIDR) */
+  name        : "Venkateswara Reddy",
+  fatherName  : "Krishnaiah Reddy",
+  gender      : "Male",
+  dob         : "15-03-1978",
+  mobile      : "+91 98765XXXXX",
+  address     : "Door No. 42, Ward-07, Main Habitation, Nandyala",
+
+  /* Property — from SVAM-AiMapper pipeline */
+  village     : "Nandyala",
+  gramPanchayat:"Nandyala Gram Panchayat",
+  block       : "Nandyala",
+  district    : "Nandyal",
+  state       : "Andhra Pradesh",
+  surveyPlotNo: "234/2B",
+  area        : "87.3",
+  location    : "Ward No. 07, Abadi Area, Nandyala",
+  landUse     : "Residential",
+  north       : "Road (6m width)",
+  east        : "D.No. 43 (Subbaiah Naidu)",
+  south       : "D.No. 41 (Ramaiah Reddy)",
+  west        : "Common Pathway (3m)",
+};
+
+/* ─── STATE ─────────────────────────────────────────────────── */
+let activeOTP = '';
+let timerInterval = null;
+let timerSecs = 30;
+let rawAadhaar = '';
+
+/* ─── UTILITIES ─────────────────────────────────────────────── */
+function today() {
+  return new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+}
+function genAppNo() {
+  return `AP/NDL/${new Date().getFullYear()}/${Math.floor(Math.random()*9000)+1000}`;
+}
+function maskAadhaar(raw) {
+  return raw.slice(0,4) + ' XXXX XXXX ' + raw.slice(-2) + 'XX';
+}
+
+function toast(title, body, type='', dur=7000) {
+  const area = document.getElementById('toastArea');
+  const el   = document.createElement('div');
+  el.className = 'toast' + (type ? ' ' + type : '');
+  el.innerHTML = `<div class="toast-ttl">${title}</div>${body}`;
+  area.appendChild(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 500);
+  }, dur);
+}
+
+function set(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+/* ─── STEP 1: FORMAT AADHAAR ────────────────────────────────── */
+function fmtAadhaar(inp) {
+  const digits = inp.value.replace(/\D/g, '').slice(0, 12);
+  inp.value    = digits.replace(/(\d{4})(?=\d)/g, '$1 ');
+  rawAadhaar   = digits;
+  const icon   = document.getElementById('adIcon');
+  const btn    = document.getElementById('sendBtn');
+  if (digits.length === 12) {
+    inp.classList.add('ok');
+    icon.textContent = '✅'; icon.classList.add('show');
+    btn.disabled = false;
+  } else {
+    inp.classList.remove('ok');
+    icon.classList.remove('show');
+    btn.disabled = true;
+  }
+}
+
+/* ─── STEP 1 → 2: SEND OTP ──────────────────────────────────── */
+function sendOTP() {
+  activeOTP = String(Math.floor(100000 + Math.random() * 900000));
+
+  /* Advance step indicators */
+  stepDone(0); stepAct(1);
+
+  /* Show OTP section */
+  document.getElementById('sec1').classList.remove('show');
+  document.getElementById('sec2').classList.add('show');
+  document.getElementById('mobDisplay').textContent = DEMO.mobile;
+
+  /* Start countdown */
+  startTimer();
+
+  /* Toast with OTP (demo mode) */
+  toast(
+    '📱 OTP Sent Successfully',
+    `<div style="margin-top:4px;font-size:11px;color:#aaa">Sent to ${DEMO.mobile} — Demo OTP:</div>
+     <span class="toast-otp">${activeOTP}</span>
+     <div class="toast-note">⚠️ Demo mode only: OTP shown for testing</div>`,
+    '', 14000
+  );
+}
+
+/* ─── TIMER ─────────────────────────────────────────────────── */
+function startTimer() {
+  timerSecs = 30;
+  document.getElementById('resendBtn').disabled = true;
+  document.getElementById('timerTxt').textContent = '0:30';
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    timerSecs--;
+    const s = timerSecs;
+    document.getElementById('timerTxt').textContent = `0:${s < 10 ? '0'+s : s}`;
+    if (s <= 0) {
+      clearInterval(timerInterval);
+      document.getElementById('resendBtn').disabled = false;
+      document.getElementById('timerTxt').textContent = '';
+    }
+  }, 1000);
+}
+
+function resend() {
+  activeOTP = String(Math.floor(100000 + Math.random() * 900000));
+  otpBoxes().forEach(b => { b.value = ''; b.classList.remove('filled'); });
+  document.getElementById('verifyBtn').disabled = true;
+  startTimer();
+  toast(
+    '📱 New OTP Sent',
+    `<span class="toast-otp">${activeOTP}</span>
+     <div class="toast-note">⚠️ Demo mode</div>`,
+    'warn', 12000
+  );
+}
+
+/* ─── OTP BOX LOGIC ─────────────────────────────────────────── */
+function otpBoxes() { return [...document.querySelectorAll('.otp-box')]; }
+
+function otpIn(el, idx) {
+  el.value = el.value.replace(/\D/g,'').slice(-1);
+  el.classList.toggle('filled', !!el.value);
+  if (el.value) {
+    const next = otpBoxes()[idx + 1];
+    if (next) next.focus();
+  }
+  checkOTPFull();
+}
+
+function otpKey(e, idx) {
+  if (e.key === 'Backspace') {
+    const boxes = otpBoxes();
+    if (!boxes[idx].value && idx > 0) boxes[idx-1].focus();
+  }
+}
+
+function otpPaste(e) {
+  e.preventDefault();
+  const digits = (e.clipboardData.getData('text')).replace(/\D/g,'').slice(0,6);
+  otpBoxes().forEach((b, i) => {
+    b.value = digits[i] || '';
+    b.classList.toggle('filled', !!b.value);
+  });
+  checkOTPFull();
+}
+
+function checkOTPFull() {
+  const full = otpBoxes().every(b => b.value !== '');
+  document.getElementById('verifyBtn').disabled = !full;
+}
+
+/* ─── STEP 2 → 3: VERIFY OTP ─────────────────────────────────── */
+function verifyOTP() {
+  const entered = otpBoxes().map(b => b.value).join('');
+  if (entered !== activeOTP) {
+    toast('❌ Incorrect OTP',
+      '<div style="margin-top:4px;font-size:11px">Please re-check and try again.</div>',
+      'warn', 4000);
+    otpBoxes().forEach(b => { b.style.borderColor = '#e53935'; });
+    setTimeout(() => otpBoxes().forEach(b => { b.style.borderColor = ''; }), 1600);
+    return;
+  }
+
+  /* Show loading overlay with staged steps */
+  const ov  = document.getElementById('loadOverlay');
+  const bar = document.getElementById('loadBar');
+  ov.classList.add('show');
+
+  const STEPS  = ['ls0','ls1','ls2','ls3'];
+  const TEXTS  = [
+    '◦ &nbsp;Verifying Aadhaar with UIDAI CIDR...',
+    '◦ &nbsp;Fetching demographic data from CIDR...',
+    '◦ &nbsp;Retrieving property map · SVAM-AiMapper v2.1...',
+    '◦ &nbsp;Generating SVAMITVA Property Card...',
+  ];
+  let si = 0;
+
+  const ticker = setInterval(() => {
+    if (si > 0) {
+      const prev = document.getElementById(STEPS[si-1]);
+      prev.innerHTML = '✓ &nbsp;' + prev.innerHTML.replace(/[◦▶] &nbsp;/, '');
+      prev.className = 'done';
+    }
+    if (si < STEPS.length) {
+      const cur = document.getElementById(STEPS[si]);
+      cur.innerHTML = '▶ &nbsp;' + cur.innerHTML.replace(/[◦▶✓] &nbsp;/, '');
+      cur.className = 'active';
+      bar.style.width = ((si + 1) / STEPS.length * 100) + '%';
+      si++;
+    } else {
+      clearInterval(ticker);
+      setTimeout(() => { ov.classList.remove('show'); populateAndShow(); }, 500);
+    }
+  }, 750);
+}
+
+/* ─── POPULATE & SHOW DOCUMENTS ─────────────────────────────── */
+function populateAndShow() {
+  const r   = DEMO;
+  const an  = genAppNo();
+  const cn  = an.replace('AP/', 'AP/PC/');
+  const dt  = today();
+  const adm = maskAadhaar(rawAadhaar);
+  const bnds = `N: ${r.north}  |  E: ${r.east}  |  S: ${r.south}  |  W: ${r.west}`;
+
+  /* Application */
+  set('aAppNo',   an);     set('aDate',    dt);
+  set('aVillage', r.village); set('aGP',    r.gramPanchayat);
+  set('aBlock',   r.block);   set('aDistrict', r.district);
+  set('aState',   r.state);
+  set('aName',    r.name);    set('aFather',   r.fatherName);
+  set('aAddr',    r.address); set('aMobile',   r.mobile);
+  set('aAadhaar', adm);
+  set('aSurvey',  r.surveyPlotNo); set('aArea',   r.area + ' Sq. m.');
+  set('aLoc',     r.location);     set('aLandUse', r.landUse);
+  set('aBounds',  bnds);
+
+  /* Property Card */
+  set('cCardNo',   cn);       set('cVillage', r.village);
+  set('cGP',       r.gramPanchayat); set('cBlock', r.block);
+  set('cDistrict', r.district); set('cState',  r.state);
+  set('cSurvey',   r.surveyPlotNo); set('cArea', r.area + ' Sq. m.');
+  set('cLandUse',  r.landUse);
+  set('cName',     r.name);     set('cFather', r.fatherName);
+  set('cAddr',     r.address);  set('cAadhaar', adm);
+  set('cMobile',   r.mobile);
+  set('cNorth',    r.north);    set('cEast',  r.east);
+  set('cSouth',    r.south);    set('cWest',  r.west);
+  set('cIssueDate', dt);
+  set('mapArea',    r.area + ' m²');
+
+  /* Step 3 done */
+  stepDone(1); stepDone(2);
+
+  /* Show documents page */
+  document.getElementById('verifyScreen').style.display = 'none';
+  document.getElementById('docsPage').style.display     = 'block';
+
+  toast(
+    '✅ Property Card Generated!',
+    `<div style="margin-top:4px;font-size:11px">
+      Card No: <strong>${cn}</strong><br>
+      Owner: <strong>${r.name}</strong><br>
+      Village: ${r.village} · ${r.district}
+    </div>`,
+    '', 8000
+  );
+}
+
+/* ─── STEP INDICATOR HELPERS ────────────────────────────────── */
+function stepAct(i) {
+  document.getElementById('sc' + i).className = 'step-circ act';
+}
+function stepDone(i) {
+  document.getElementById('sc' + i).className  = 'step-circ done';
+  document.getElementById('sc' + i).textContent = '✓';
+  if (i < 2) document.getElementById('sl' + i).classList.add('done');
+}
+
+/* ─── DOWNLOAD PROPERTY CARD ────────────────────────────────── */
+function downloadCard() {
+  const cardEl = document.getElementById('paperCard');
+  const style  = document.querySelector('style').textContent;
+  const html   = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>SVAMITVA Property Card</title>
+<style>
+body{margin:24px;font-family:'Segoe UI',Arial,sans-serif;background:white;}
+${style}
+.dpaper{box-shadow:none;border:1px solid #ccc;max-width:620px;margin:0 auto;}
+</style></head><body>${cardEl.outerHTML}</body></html>`;
+  const blob = new Blob([html], {type:'text/html'});
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  const cn   = document.getElementById('cCardNo').textContent.replace(/\//g,'_');
+  a.download = `SVAMITVA_PropertyCard_${cn || 'card'}.html`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('⬇ Downloaded!',
+    '<div style="margin-top:4px;font-size:11px">Open the .html file in any browser and use Ctrl+P → Save as PDF to get a printable PDF.</div>',
+    '', 5000);
+}
+
+/* ─── GO BACK ───────────────────────────────────────────────── */
+function goBack() {
+  clearInterval(timerInterval);
+  document.getElementById('sec2').classList.remove('show');
+  document.getElementById('sec1').classList.add('show');
+  document.getElementById('sc0').className  = 'step-circ act';
+  document.getElementById('sc0').textContent = '1';
+  document.getElementById('sl0').classList.remove('done');
+  document.getElementById('sc1').className  = 'step-circ';
+  otpBoxes().forEach(b => { b.value=''; b.classList.remove('filled'); });
+  document.getElementById('verifyBtn').disabled = true;
+  activeOTP = '';
+}
+
+/* ─── RESET ─────────────────────────────────────────────────── */
+function resetAll() {
+  clearInterval(timerInterval);
+  activeOTP = ''; rawAadhaar = '';
+
+  const inp = document.getElementById('adInput');
+  inp.value = ''; inp.className = 'ad-input';
+  document.getElementById('adIcon').classList.remove('show');
+  document.getElementById('sendBtn').disabled = true;
+
+  otpBoxes().forEach(b => { b.value=''; b.classList.remove('filled'); b.style.borderColor=''; });
+  document.getElementById('verifyBtn').disabled = true;
+
+  document.getElementById('sec2').classList.remove('show');
+  document.getElementById('sec1').classList.add('show');
+
+  ['sc0','sc1','sc2'].forEach((id,i) => {
+    const el = document.getElementById(id);
+    el.className = 'step-circ' + (i===0 ? ' act' : '');
+    el.textContent = i+1;
+  });
+  ['sl0','sl1'].forEach(id => document.getElementById(id).classList.remove('done'));
+
+  /* Reset loading step text */
+  const TEXTS = [
+    '◦ &nbsp;Verifying Aadhaar with UIDAI CIDR...',
+    '◦ &nbsp;Fetching demographic data from CIDR...',
+    '◦ &nbsp;Retrieving property map · SVAM-AiMapper v2.1...',
+    '◦ &nbsp;Generating SVAMITVA Property Card...',
+  ];
+  ['ls0','ls1','ls2','ls3'].forEach((id,i) => {
+    const el = document.getElementById(id);
+    el.innerHTML = TEXTS[i]; el.className = '';
+  });
+  document.getElementById('loadBar').style.width = '0%';
+
+  document.getElementById('docsPage').style.display  = 'none';
+  document.getElementById('verifyScreen').style.display = 'flex';
+}
+</script>
+</body>
+</html>
